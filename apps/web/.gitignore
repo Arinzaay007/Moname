@@ -1,0 +1,7 @@
+# Local config: may point at a local anvil and must never carry a secret.
+.env.local
+.env*.local
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo

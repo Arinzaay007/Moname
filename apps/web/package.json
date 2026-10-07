@@ -1,0 +1,26 @@
+{
+  "name": "@monpay/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev -H 0.0.0.0 -p 3000",
+    "build": "next build",
+    "start": "next start -H 0.0.0.0 -p 3000",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@category-labs/mera": "0.2.0",
+    "next": "^15.5.27",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "viem": "2.37.6"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/react": "19.1.0",
+    "@types/react-dom": "19.1.0",
+    "typescript": "5.7.2"
+  }
+}

@@ -155,6 +155,48 @@ Pass explicit gas. Monad charges on the declared limit, so an over-estimate is r
 
 ---
 
+## Web app
+
+`apps/web` — Next.js 15 App Router, React 19, TypeScript, viem 2.37, `@category-labs/mera` 0.2.0.
+
+```bash
+cd apps/web && npm install && npm run dev
+```
+
+It reads chain state through `app/api/rpc`, a server-side JSON-RPC proxy, rather than calling a public RPC from the browser: CORS on public RPCs is not something to bet a demo on, and the preview host is not localhost. The proxy allowlists methods, so `eth_getLogs` is refused outright — Monad caps it at a 100-block range anyway and full nodes do not serve arbitrary historic state, so the UI reads live state instead of reconstructing history.
+
+### Passkeys: one passkey, three keys
+
+`lib/mera.ts` uses Mera's secret-vault API to put **three separate keys under one passkey**:
+
+| Key | Created with | Can |
+|---|---|---|
+| owner | `createSecretVaultWithNewPasskey` (this is the ceremony that creates the passkey) | fund streams, set terms, appoint controllers |
+| session | `createSecretVaultWithExistingPasskey` | `pause` / `resume` / `cancel` — registered as a StreamVault controller, so it cannot withdraw or change terms |
+| receiving | `createSecretVaultWithExistingPasskey` | be paid; what `@handle` resolves to |
+
+`toViemAccount` signs digests with the live session key, so **only the unlock shows a passkey prompt** — after that, signing is silent, which is what makes a per-second streaming UI usable. `session.end()` zeroes the key irreversibly.
+
+Mera's two ceremonies take different argument shapes: creation wants `rp: { id, name }`, assertion wants a bare `rpId: string`. `lib/mera.ts` is typechecked against the real package before any UI is built on it, which is how that got caught.
+
+`PRF_UNAVAILABLE` gets a plain-English explanation in the UI rather than a stack trace: on desktop Chrome only passkeys saved to **Google Password Manager** return a PRF output, and a passkey in the browser's local profile will fail. This is documented as the most common setup failure, so it is handled rather than discovered mid-demo.
+
+### Running it without a mainnet deployment
+
+§9.1 wants a functioning prototype, and one that cannot start until someone funds a key is not one. So `NEXT_PUBLIC_CHAIN=local` runs against a Monad-mode anvil:
+
+```bash
+anvil --network monad --chain-id 10143 --block-time 1
+forge create test/mocks/MockAUSD.sol:MockAUSD --rpc-url http://127.0.0.1:8545 --private-key $PK --broadcast
+forge script script/Deploy.s.sol:Deploy --rpc-url http://127.0.0.1:8545 --broadcast --private-key $PK
+```
+
+`MockAUSD` mirrors the real token's surface — 6 decimals, symbol `AUSD`, a real EIP-712 `DOMAIN_SEPARATOR` — so the permit path is exercised for real. Its `mint` is open, which is why the UI shows a **mint test funds** button *only* in local mode, labelled as such: the real AUSD is a permissioned-mint proxy with no public faucet.
+
+The UI also refuses to pretend: when contract addresses are unset it says so and disables on-chain actions rather than rendering a mockup that looks live.
+
+`npm audit` currently reports 4 transitive advisories (postcss and ws via next and viem, both needing breaking upgrades). Neither is in a path this app uses — `sharp` is next/image, which is not used, and `ws` is viem's WebSocket transport, while this app uses HTTP only. Recorded rather than silently accepted.
+
 ## Deployment
 
 **Primary token: Agora AUSD.** The Agora cross-border bounty names AUSD specifically, and AUSD is the only dollar stablecoin deployed on *both* Monad networks — identical bytecode, codesize 5937 on mainnet and testnet. USDC is secondary and mainnet-only.
