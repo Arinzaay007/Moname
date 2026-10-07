@@ -1,0 +1,17 @@
+# Foundry build artifacts — reproducible from source
+cache/
+out/
+broadcast/
+
+# Never commit keys. See README "Security".
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Node / frontend
+node_modules/
+apps/web/.next/
+apps/web/out/
+.DS_Store
