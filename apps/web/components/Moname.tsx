@@ -27,6 +27,51 @@ type StreamRow = {
   cancelled: boolean;
 };
 
+/**
+ * Hand a signed permit to the server relay.
+ *
+ * Returns null (rather than throwing) when the relay is simply not configured, so the
+ * caller can fall back to broadcasting the permit itself. A genuine failure — the vault
+ * rejecting the permit, estimation failing — throws, because falling back would then
+ * just burn the payer's gas on a transaction that cannot succeed.
+ */
+async function relayPermit(p: {
+  payer: string; recipient: string; token: string;
+  amount: bigint; duration: bigint; deadline: bigint;
+  v: number; r: string; s: string;
+}): Promise<{ hash: `0x${string}`; gasDeclared: string; gasUsed: string } | null> {
+  let res: Response;
+  try {
+    res = await fetch("/api/relay", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        payer: p.payer, recipient: p.recipient, token: p.token,
+        amount: p.amount.toString(), duration: p.duration.toString(),
+        deadline: p.deadline.toString(), v: String(p.v), r: p.r, s: p.s,
+      }),
+    });
+  } catch (e) {
+    // Network-level failure reaching our own server: fall back rather than block.
+    console.warn("relay unreachable", e);
+    return null;
+  }
+
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean; hash?: string; gasDeclared?: string; gasUsed?: string; error?: string;
+  };
+
+  if (res.status === 503) return null; // relay not configured or vault not deployed
+  if (!res.ok || !data.ok || !data.hash) {
+    throw new Error(data.error ?? `Relay rejected the permit (HTTP ${res.status}).`);
+  }
+  return {
+    hash: data.hash as `0x${string}`,
+    gasDeclared: data.gasDeclared ?? "?",
+    gasUsed: data.gasUsed ?? "?",
+  };
+}
+
 export default function Moname() {
   const chain = useMemo(activeChain, []);
   const mode = chainMode();
@@ -43,6 +88,12 @@ export default function Moname() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  /** Which path the last permit took, and what it cost. Shown so "gasless" is
+   *  never a claim the UI cannot back up. */
+  const [gasNote, setGasNote] = useState<string | null>(null);
+  /** Is the gasless relay configured? Probed on boot so the UI never claims
+   *  "the payer sends nothing" while the relay is actually down. */
+  const [relayUp, setRelayUp] = useState<boolean | null>(null);
 
   // keys
   const [keys, setKeys] = useState<{ role: KeyRole; address: string }[]>([]);
@@ -69,6 +120,13 @@ export default function Moname() {
   useEffect(() => {
     setKeys(storedKeys());
     const problem = secureContextProblem();
+
+    // Probe the relay once. A failed probe is not an error worth showing — it just
+    // means the honest fallback text applies.
+    fetch("/api/relay")
+      .then((r) => r.json())
+      .then((d: { ok?: boolean }) => setRelayUp(Boolean(d.ok)))
+      .catch(() => setRelayUp(false));
     if (problem) setError(problem);
     let cancelled = false;
     (async () => {
@@ -216,9 +274,32 @@ export default function Moname() {
       const p = await signPermit(publicClient, wc, primary.address, primary.symbol, {
         owner: unlocked.address, spender: deployment.streamVault, value: units, nonce, deadline,
       });
+
+      const args = [unlocked.address, recipient, primary.address, units, dur, deadline, p.v, p.r, p.s] as const;
+
+      // Hand the signature to the relay so the payer never sends a transaction and
+      // never needs MON. createStreamWithPermit is permissionless, so if the relay
+      // is not configured we fall back to broadcasting it ourselves — but we say so
+      // loudly, because that fallback means the payer IS paying gas and the
+      // "gasless" label would otherwise be a lie.
+      const relayed = await relayPermit({
+        payer: unlocked.address, recipient, token: primary.address,
+        amount: units, duration: dur, deadline, v: p.v, r: p.r, s: p.s,
+      });
+      if (relayed) {
+        setGasNote(
+          `Relayed — the payer sent no transaction and holds no MON. Declared ${relayed.gasDeclared} gas, used ${relayed.gasUsed}.`,
+        );
+        return relayed.hash;
+      }
+
+      setGasNote(
+        "Relay unavailable, so the payer is broadcasting this permit themselves and paying gas. " +
+          "Set RELAYER_PRIVATE_KEY on the server for the real gasless path.",
+      );
       return wc.writeContract({
         address: deployment.streamVault, abi: streamVaultAbi, functionName: "createStreamWithPermit",
-        args: [unlocked.address, recipient, primary.address, units, dur, deadline, p.v, p.r, p.s],
+        args: args as never,
         account: unlocked.account, chain, gas: GAS_LIMITS.createStreamWithPermit,
       });
     });
@@ -256,7 +337,7 @@ export default function Moname() {
   return (
     <div className="wrap">
       <header className="top">
-        <h1>Mon<span className="dot">Pay</span></h1>
+        <h1>Mon<span className="dot">ame</span></h1>
         <div className="small muted">
           {chain.name} · chain {chain.id} ·{" "}
           {blockNumber !== undefined ? <>block <b className="mono">{blockNumber.toString()}</b></> : "connecting…"}
@@ -405,9 +486,19 @@ export default function Moname() {
           </button>
           <span className="small muted">
             Token: <b>{primary.symbol}</b> {shortAddress(primary.address)} · the payer signs an
-            EIP-2612 permit and never sends a transaction.
+            EIP-2612 permit. Whether they then <em>send</em> anything depends on the relay:
+            {relayUp === null
+              ? " checking…"
+              : relayUp
+                ? " it is up, so they send nothing and hold no MON."
+                : " it is down, so they would have to broadcast it themselves and pay gas."}
           </span>
         </div>
+        {gasNote && (
+          <div className="small" style={{ marginTop: 10, color: gasNote.startsWith("Relayed") ? "#4ade80" : "#fbbf24" }}>
+            {gasNote}
+          </div>
+        )}
       </section>
 
       <section className="panel">

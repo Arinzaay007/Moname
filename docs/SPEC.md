@@ -246,21 +246,59 @@ Read off-chain with `cast` on 2026-10-07, and re-asserted against live state by 
 
 `forge test --network monad --gas-report`
 
-| Call | Avg | Median | Max |
+**Read this table with one caveat, because it bit us.** Forge's gas report aggregates
+*every* call to a function across the whole suite — including the calls made inside
+`vm.expectRevert` tests. For a function whose coverage is mostly negative tests, the median
+is therefore a **revert cost**, not a success cost. Two rows were wrong by a factor of four
+and six before this was caught, and both were the gasless-path functions we had been quoting
+as headlines:
+
+| Call | Published (wrong) | Corrected | Why it was wrong |
 |---|---|---|---|
-| `accrued` | 1,920 | 1,926 | 9,926 |
-| `withdrawable` | 2,145 | 2,113 | 2,183 |
-| `streams` | 4,328 | 1,368 | 9,368 |
-| `resume` | 36,195 | 35,781 | 44,134 |
-| `pause` | 41,294 | 42,782 | 42,794 |
-| `createStreamWithPermit` | 130,456 | 70,772 | 275,876 |
-| `withdrawAll` | 73,242 | 72,127 | 89,128 |
-| `creditArrival` | 77,873 | 30,857 | 171,925 |
-| `withdraw` | 81,391 | 89,414 | 89,496 |
-| `createStream` | 210,584 | 212,958 | 216,089 |
-| `createStreamWithControllers` | 247,083 | 261,908 | 261,908 |
+| `createStreamWithPermit` | median 70,772 | **275,876** | 6 calls, 4 of them deliberate reverts from the abuse tests |
+| `creditArrival` | median 30,857 | **198,696** | 5 calls, most of them the forwarder-only rejection |
+
+The figures below are **success-path** gas. Where a row is measured across many calls the
+median is meaningful; where a function has only a handful of calls we re-ran it in isolation
+with `--match-test` so the number describes a call that actually succeeded.
+
+| Call | Success gas | Calls | Note |
+|---|---|---|---|
+| `accrued` | 1,936 median · 9,936 max | 557 | view, no writes — poll it every block |
+| `withdrawable` | 2,129 median · 2,458 max | 716 | view |
+| `streams` | 1,397 median · 9,397 max | 761 | view; median is warm storage, max is cold |
+| `withdrawAll` | **72,184** | 1 | isolated run |
+| `withdraw` | 89,499 median | 454 | includes the ERC-20 transfer |
+| `resume` | 35,804 median · 44,121 max | 13 | |
+| `pause` | 42,792 median | 18 | |
+| `cancel` | 87,990 median · 112,108 max | 6 | pays two transfers |
+| `setController` | 38,561 | 2 | |
+| `createStream` | 212,958 median · 216,089 max | 274 | includes `transferFrom` |
+| `createStreamWithControllers` | **261,951** | 1 | isolated run, ≤ 4 controllers |
+| `createStreamWithPermit` | **275,876** | 1 | isolated run — the gasless path |
+| `creditArrival` | **198,696** | 1 | isolated run — forwarder path |
+
+**Cross-checked against a real deployment, not just the test harness.** `tools/test-relay.sh`
+relays a genuine EIP-2612 signature over HTTP against a live anvil:
+
+| | gas used | gas declared |
+|---|---|---|
+| first relay (cold token storage) | 241,924 | 278,212 |
+| second relay (warm) | 224,900 | 258,635 |
+
+Lower than the 275,876 forge figure because the test harness deploys the token fresh per
+test, leaving more slots cold. Both are reported rather than the more flattering one.
+
+The relay declares `estimate × 1.15`, clamped to a 90,000 floor and a 400,000 ceiling. That
+matters specifically because **Monad charges gas on the declared limit, not gas used** — a
+fixed 400,000 would have overpaid by ~30 % on every relay.
 
 Mainnet deployment dry-run on 2026-10-07: **0.495385002 MON** (2,452,401 gas at a 100 gwei base fee) for both contracts.
+
+Contract sizes are taken from the forge artifact's `deployedBytecode` and confirmed against
+on-chain `codesize` after deployment — both say **6,783** and **1,927**. Note the gas report's
+own "Deployment Size" column disagrees (6,966); where two independent measurements agree and
+one disagrees, we publish the two.
 
 ---
 
@@ -276,6 +314,7 @@ Next.js 15.5.27 App Router · React 19 · TypeScript 5.7.2 · viem 2.37.6 · `@c
 | `lib/permit.ts` | EIP-2612 signing via `signTypedData` + `parseSignature` |
 | `lib/format.ts` | 6-decimal money formatting; integer units internally, never floats |
 | `app/api/rpc/route.ts` | Allowlisted JSON-RPC proxy |
+| `app/api/relay/route.ts` | The gasless relay — broadcasts a signed permit so the payer never transacts |
 | `app/h/[handle]/page.tsx` | The recipient's public page route — `force-dynamic`, since a handle only exists on-chain |
 | `lib/scan.ts` | Handle resolution, bounded stream enumeration, and stream-phase derivation |
 | `components/RecipientView.tsx` | The public page: live accruing balances with no wallet connected |

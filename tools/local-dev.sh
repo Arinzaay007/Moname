@@ -56,6 +56,17 @@ NEXT_PUBLIC_AUSD_ADDRESS=$AUSD
 MONAD_RPC_URL=$RPC
 EOF
 
+# The relayer pays gas on other people's behalf, so it needs a balance. Fund whatever
+# address the configured key derives to rather than assuming it is one of anvil's
+# pre-funded accounts -- a relay that silently has no MON fails in a confusing way.
+if [ -f apps/web/.env.local ] && grep -q '^RELAYER_PRIVATE_KEY=0x' apps/web/.env.local; then
+  RKEY=$(grep '^RELAYER_PRIVATE_KEY=' apps/web/.env.local | cut -d= -f2)
+  RADDR=$(cast wallet address --private-key "$RKEY")
+  echo "==> funding relayer $RADDR"
+  cast send "$RADDR" --value 5ether --rpc-url "$RPC" --private-key "$PK" >/dev/null
+  printf '    balance    '; cast balance "$RADDR" --rpc-url "$RPC" --ether; echo " MON"
+fi
+
 if [ "$SEED" = "1" ]; then
   echo "==> seeding demo data"
   send() { cast send "$@" --rpc-url "$RPC" --private-key "$PK" >/dev/null; }

@@ -44,20 +44,26 @@ Circle's own CCTP V2 fee table lists **Monad at 0 bps** for Fast Transfer, becau
 
 ### Gas (Monad execution model, `forge test --network monad --gas-report`)
 
-| Call | Avg | Median | Max | Note |
-|---|---|---|---|---|
-| `accrued` | 1,920 | 1,926 | 9,926 | view, no writes — poll it every block |
-| `withdrawable` | 2,145 | 2,113 | 2,183 | view |
-| `streams` | 4,328 | 1,368 | 9,368 | view |
-| `withdraw` | 81,391 | 89,414 | 89,496 | includes the ERC-20 transfer |
-| `withdrawAll` | 73,242 | 72,127 | 89,128 | |
-| `creditArrival` | 77,873 | 30,857 | 171,925 | relayer path, see below |
-| `pause` | 41,294 | 42,782 | 42,794 | |
-| `resume` | 36,195 | 35,781 | 44,134 | |
-| `createStream` | 210,591 | 212,931 | 212,931 | includes `transferFrom` |
-| `createStreamWithControllers` | 247,083 | 261,908 | 261,908 | ≤ 4 controllers |
+| Call | Success gas | Calls | Note |
+|---|---|---|---|
+| `accrued` | 1,936 median · 9,936 max | 557 | view, no writes — poll it every block |
+| `withdrawable` | 2,129 median · 2,458 max | 716 | view |
+| `streams` | 1,397 median · 9,397 max | 761 | view; median warm, max cold |
+| `withdrawAll` | 72,184 | 1 | |
+| `withdraw` | 89,499 median | 454 | includes the ERC-20 transfer |
+| `resume` | 35,804 median | 13 | |
+| `pause` | 42,792 median | 18 | |
+| `cancel` | 87,990 median | 6 | pays two transfers |
+| `createStream` | 212,958 median | 274 | includes `transferFrom` |
+| `createStreamWithControllers` | 261,951 | 1 | ≤ 4 controllers |
+| `createStreamWithPermit` | 275,876 | 1 | the gasless path |
+| `creditArrival` | 198,696 | 1 | relayer path, see below |
 
-Reproduce: `forge test --network monad --gas-report`
+Reproduce: `forge test --network monad --gas-report`, and `./tools/test-relay.sh` for the figures measured against a real deployment.
+
+> **These are success-path numbers, and that distinction is worth stating.** Forge's gas report aggregates every call to a function across the suite, *including* calls inside `vm.expectRevert` tests. For a function covered mostly by negative tests the median is a revert cost, not a success cost. An earlier version of this table quoted a median of 70,772 for `createStreamWithPermit` and 30,857 for `creditArrival`; the real successful calls cost **275,876** and **198,696**. Both wrong rows were the gasless functions we were quoting as headlines. Rows with few calls are now measured in isolation with `--match-test` so the number describes a call that succeeded.
+
+Measured against a live anvil through the actual HTTP relay, the same call costs 241,924 gas used / 278,212 declared on a cold first relay and 224,900 / 258,635 warm — lower than the harness figure because the test suite deploys the token fresh each time, leaving more slots cold. Both are reported rather than the flattering one.
 
 ### The accrual model, and the one decision worth reading
 
@@ -164,6 +170,31 @@ cd apps/web && npm install && npm run dev
 ```
 
 It reads chain state through `app/api/rpc`, a server-side JSON-RPC proxy, rather than calling a public RPC from the browser: CORS on public RPCs is not something to bet a demo on, and the preview host is not localhost. The proxy allowlists methods, so `eth_getLogs` is refused outright — Monad caps it at a 100-block range anyway and full nodes do not serve arbitrary historic state, so the UI reads live state instead of reconstructing history.
+
+### The gasless relay — `/api/relay`
+
+`createStreamWithPermit` is permissionless, so anyone can submit a signed permit. The relay exists so the payer does not have to.
+
+The payer signs an EIP-2612 permit in the browser. That signature binds owner, spender, value and deadline, so nobody — not this service, not anyone else — can alter the terms it relays. The payer hands it to `/api/relay` and **never sends a transaction**, which is what makes "no gas" literally true rather than aspirational.
+
+Three details that matter:
+
+- **It simulates before spending.** A reverted relay still costs gas, so the route `eth_call`s first and returns 422 without broadcasting if the vault would reject the permit. This is the main defence against being used to burn the relayer's balance.
+- **It declares gas tightly.** Monad charges on the *declared* limit, not gas used, which inverts the usual "add generous headroom" instinct. The relay estimates and declares `estimate × 1.15`, clamped to a 90,000 floor and a 400,000 ceiling. A fixed 400,000 would overpay roughly 30% on every relay.
+- **It fails honestly.** With `RELAYER_PRIVATE_KEY` unset the route returns 503, and the UI falls back to letting the payer broadcast their own permit — but then says so out loud, because in that mode the payer *is* paying gas and the "gasless" label would be a lie. The UI probes `GET /api/relay` on boot so the claim next to the button reflects reality.
+
+Sends are serialised through a promise chain, because viem derives the nonce from `pending` and two concurrent relays would compute the same one. A single-process demo can do this; a real deployment needs a nonce manager backed by shared state. The rate limit is likewise in-memory and per-IP, and is documented as best-effort rather than dressed up as abuse protection — the real protection is that a permit can only ever move the signer's own funds by the signer's own chosen amount.
+
+The key is server-side only, with no `NEXT_PUBLIC_` prefix, so it can never be inlined into a client bundle. It only ever pays gas; it can never move anyone's funds.
+
+Prove the whole path with:
+
+```bash
+./tools/local-dev.sh     # deploy + seed a local Monad-mode anvil
+./tools/test-relay.sh    # sign a real permit, relay it over HTTP, assert the payer never transacted
+```
+
+`test-relay.sh` is the HTTP-level counterpart to `test_gasless_payerSignsAndNeverSendsATransaction`. The Solidity test proves the *contract* cannot charge a payer who did not sign. The script proves the path a real user takes, and asserts the payer's transaction count is still zero afterwards, that the permit nonce was consumed so it cannot be replayed, and that replaying it anyway is refused with 422 and no gas spent.
 
 ### The recipient's public page — `/h/@handle`
 
