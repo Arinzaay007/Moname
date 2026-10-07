@@ -81,7 +81,7 @@ export function tokensFor(chainId: number): DollarToken[] {
 }
 
 // ---------------------------------------------------------------------------
-// MonPay contract addresses
+// Moname contract addresses
 //
 // Empty until deployed. Set these in .env.local after running:
 //   forge script script/Deploy.s.sol:Deploy --rpc-url monad --broadcast

@@ -14,7 +14,7 @@ import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20P
 /// Permit is the load-bearing part: it is what makes the gasless path work, because a
 /// payment becomes a signature and the payer never needs MON or sends a transaction.
 /// The real AUSD also supports EIP-3009 transferWithAuthorization; that is not modelled
-/// here because MonPay's relayer uses the EIP-2612 + transferFrom route.
+/// here because Moname's relayer uses the EIP-2612 + transferFrom route.
 ///
 /// `mint` is open so tests can fund anyone. The real AUSD is a permissioned-mint
 /// EIP-1967 proxy and cannot be funded this way on a fork — see test/Fork.t.sol.

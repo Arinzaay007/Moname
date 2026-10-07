@@ -12,7 +12,7 @@ import {HandleRegistry} from "../src/HandleRegistry.sol";
 ///
 ///   cast chain-id --rpc-url https://rpc.monad.xyz                # 143
 ///   cast call 0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a 'symbol()(string)'  --rpc-url ...
-library MonPayConfig {
+library MonameConfig {
     // ---- networks -------------------------------------------------------
     uint256 internal constant MAINNET_CHAIN_ID = 143;
     uint256 internal constant TESTNET_CHAIN_ID = 10143;
@@ -41,7 +41,7 @@ library MonPayConfig {
     }
 }
 
-/// @notice Deploys the MonPay contracts.
+/// @notice Deploys the Moname contracts.
 ///
 ///   # mainnet (chain 143) — the submission target
 ///   forge script script/Deploy.s.sol:Deploy --rpc-url monad --broadcast \
@@ -67,10 +67,10 @@ contract Deploy is Script {
 
         vm.stopBroadcast();
 
-        address token = MonPayConfig.primaryToken();
+        address token = MonameConfig.primaryToken();
 
         console2.log("");
-        console2.log("=== MonPay deployment ===");
+        console2.log("=== Moname deployment ===");
         console2.log("chain id:        ", block.chainid);
         console2.log("StreamVault:     ", address(vault));
         console2.log("HandleRegistry:  ", address(handles));

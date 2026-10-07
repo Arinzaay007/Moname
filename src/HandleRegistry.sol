@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 /// @title HandleRegistry
-/// @notice On-chain `@handle` -> address resolution for MonPay on Monad.
+/// @notice On-chain `@handle` -> address resolution for Moname on Monad.
 /// @dev Postgres remains the fast read path; this contract exists so a judge (or anyone)
 ///      can verify handle ownership without trusting our database. Rules 9.2 asks for
 ///      contract addresses / tx hashes — this is the identity half of that evidence.

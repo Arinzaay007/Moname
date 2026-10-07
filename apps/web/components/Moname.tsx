@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { createPublicClient, createWalletClient, http, type PublicClient, type WalletClient } from "viem";
 import { streamVaultAbi, handleRegistryAbi, erc20PermitAbi } from "@/lib/abi";
 import {
@@ -26,7 +27,7 @@ type StreamRow = {
   cancelled: boolean;
 };
 
-export default function MonPay() {
+export default function Moname() {
   const chain = useMemo(activeChain, []);
   const mode = chainMode();
   const tokens = useMemo(() => tokensFor(chain.id), [chain.id]);
@@ -114,7 +115,7 @@ export default function MonPay() {
   const doOnboard = useCallback(async () => {
     setBusy("onboard");
     try {
-      const created = await onboard(handle.trim() || "monpay-user");
+      const created = await onboard(handle.trim() || "moname-user");
       setKeys(storedKeys());
       flash(`Passkey created. Three keys under one passkey — owner ${shortAddress(created.owner)}, session ${shortAddress(created.session)}, receiving ${shortAddress(created.receiving)}.`);
     } catch (e) { fail(e); } finally { setBusy(null); }
@@ -335,9 +336,30 @@ export default function MonPay() {
             </button>
           </div>
           {registeredHandle && (
-            <p className="small muted" style={{ marginTop: 10 }}>
-              <code>@{registeredHandle}</code> resolves to your receiving key. Share that, not an address.
-            </p>
+            <div style={{ marginTop: 10 }}>
+              <p className="small muted">
+                <code>@{registeredHandle}</code> resolves to your receiving key. Share that, not an address.
+              </p>
+              {/* The recipient's public page. It opens with no wallet, no passkey and
+                  no account, so this link is safe to hand to a client — which is the
+                  point: they can watch the money actually move. */}
+              <div className="row" style={{ marginTop: 8, gap: 8 }}>
+                <Link href={`/h/@${registeredHandle}`} className="pill" style={{ textDecoration: "none" }}>
+                  open public page ↗
+                </Link>
+                <button
+                  className="pill"
+                  onClick={() => {
+                    const url = `${window.location.origin}/h/@${registeredHandle}`;
+                    void navigator.clipboard?.writeText(url);
+                    flash(`Copied ${url}`);
+                  }}
+                >
+                  copy link
+                </button>
+                <span className="small muted mono">/h/@{registeredHandle}</span>
+              </div>
+            </div>
           )}
           {unlocked && (
             <p className="small muted" style={{ marginTop: 10 }}>

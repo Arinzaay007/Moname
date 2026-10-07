@@ -8,7 +8,7 @@ import {HandleRegistry} from "../src/HandleRegistry.sol";
 import {MockAUSD} from "./mocks/MockAUSD.sol";
 import {MockUSDC} from "./mocks/MockUSDC.sol";
 
-/// @notice MonPay core tests, run under Monad execution (`network = "monad"` in foundry.toml).
+/// @notice Moname core tests, run under Monad execution (`network = "monad"` in foundry.toml).
 ///         The accrual + pause invariants here are the evidence behind the demo claim that
 ///         money visibly accrues by the second and that a pause never destroys principal.
 contract StreamVaultTest is Test {

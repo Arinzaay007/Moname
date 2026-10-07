@@ -13,7 +13,7 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import type { LocalAccount } from "viem";
 
 /**
- * MonPay's passkey layer — the on-chain half of the "One Passkey, Many Keys" model.
+ * Moname's passkey layer — the on-chain half of the "One Passkey, Many Keys" model.
  *
  * ONE passkey unlocks THREE separate keys, each with a different power. The point of the
  * split is that the key which can move money is not the key that lives in page memory:
@@ -38,7 +38,7 @@ export const KEY_ROLES: { role: KeyRole; label: string; can: string }[] = [
   { role: "receiving", label: "Receiving key", can: "be paid; what @handle resolves to" },
 ];
 
-const STORAGE_KEY = "monpay.passkey.vaults.v1";
+const STORAGE_KEY = "moname.passkey.vaults.v1";
 
 type VaultStore = Partial<Record<KeyRole, { vault: PasskeySecretVault; address: string }>>;
 
@@ -90,7 +90,7 @@ export function hasPasskey(): boolean {
  */
 export function relyingParty(): { id: string; name: string } {
   const host = typeof window === "undefined" ? "localhost" : window.location.hostname;
-  return { id: host, name: "MonPay" };
+  return { id: host, name: "Moname" };
 }
 
 /** Relying party id for assertion ceremonies (unlock, adding a derived key). */

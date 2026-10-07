@@ -1,4 +1,4 @@
-# MonPay
+# Moname
 
 **Money that arrives from anywhere and streams in by the second, in Agora's AUSD, on Monad mainnet.**
 
@@ -39,7 +39,7 @@ Circle's own CCTP V2 fee table lists **Monad at 0 bps** for Fast Transfer, becau
 
 | Contract | Size | What it does |
 |---|---|---|
-| `src/StreamVault.sol` | 6,096 B (128 KB limit) | Money streaming with pause, resume, cancel, delegated controllers, and forwarder-credited arrivals |
+| `src/StreamVault.sol` | 6,783 B (128 KB limit) | Money streaming with pause, resume, cancel, delegated controllers, and forwarder-credited arrivals |
 | `src/HandleRegistry.sol` | 1,927 B | `@handle` → address. Pay someone without ever showing them a hex string |
 
 ### Gas (Monad execution model, `forge test --network monad --gas-report`)
@@ -164,6 +164,14 @@ cd apps/web && npm install && npm run dev
 ```
 
 It reads chain state through `app/api/rpc`, a server-side JSON-RPC proxy, rather than calling a public RPC from the browser: CORS on public RPCs is not something to bet a demo on, and the preview host is not localhost. The proxy allowlists methods, so `eth_getLogs` is refused outright — Monad caps it at a 100-block range anyway and full nodes do not serve arbitrary historic state, so the UI reads live state instead of reconstructing history.
+
+### The recipient's public page — `/h/@handle`
+
+A payment page that opens with **no wallet, no passkey, no account and no setup**, because the person looking at it is often not the person being paid. It resolves the handle on-chain, finds the streams addressed to that receiving key, and polls `accrued()` for each active one every 300 ms — the balances visibly climb, several times a second. Withdrawing is the only gated action, and it needs the receiving key.
+
+Finding those streams is the interesting constraint. Monad nodes do not serve arbitrary historic state, and `eth_getLogs` is capped at a 100-block range — about **30 seconds** of history at 300 ms blocks — so event scanning cannot answer "show me my payments". `lib/scan.ts` therefore walks the stream counter backwards over live current state and keeps the rows whose recipient matches. No indexer, no archive node.
+
+That is O(streams ever created) rather than O(this recipient's streams), bounded by `SCAN_WINDOW = 64`, and the page says so on itself instead of hiding it. The fixes are an on-chain per-recipient index or an Envio HyperSync indexer — see ROADMAP.md. We chose not to modify StreamVault in the final week to add the former: it is fork-tested against live mainnet with 58 passing tests, and that verification is worth more than a cheaper read.
 
 ### Passkeys: one passkey, three keys
 

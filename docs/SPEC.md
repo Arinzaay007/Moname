@@ -1,4 +1,4 @@
-# MonPay — complete specification
+# Moname — complete specification
 
 Everything this project is, as it actually stands in the code. Where a number appears here
 it was either measured on-chain with `cast`, read from a forge artifact, or produced by a
@@ -8,11 +8,11 @@ passing test — not estimated and not copied from a third-party README.
 
 ## 1. What it is
 
-MonPay makes a cross-border payment **arrive as a stream instead of a lump sum**.
+Moname makes a cross-border payment **arrive as a stream instead of a lump sum**.
 
 A client in Berlin owes a freelancer in Port Harcourt. Today that money moves as one
 transfer that lands days later, costs a percentage of a small amount, and leaves the
-freelancer unable to prove income in progress. With MonPay the client signs once, the money
+freelancer unable to prove income in progress. With Moname the client signs once, the money
 lands on Monad as Agora's AUSD, and from that instant it accrues to the freelancer **every
 300 milliseconds**. She can withdraw at any moment. She never sees a seed phrase, never
 holds gas, and can be paid by `@handle` instead of a 42-character address.
@@ -38,7 +38,7 @@ trivial at 300 ms blocks with ~600 ms deterministic finality.
 
 ### 2.1 Receiving for the first time
 
-1. Open MonPay. Tap **Create passkey**. One WebAuthn prompt.
+1. Open Moname. Tap **Create passkey**. One WebAuthn prompt.
 2. That single ceremony creates a passkey and encrypts **three** separate keys under it (owner, session, receiving). No seed phrase is ever generated, shown, or stored.
 3. Claim `@arinza`. The handle is registered to the **receiving** key — deliberately not the owner key, so being paid and holding funds are different capabilities.
 4. Share `@arinza`. That is the whole onboarding.
@@ -72,11 +72,33 @@ Unlock the **session** key. It can `pause`, `resume` and `cancel`, and nothing e
 cannot withdraw and cannot change terms, because on-chain it is a `controllers` entry, not
 the sender. A compromised browser session can interrupt a stream; it cannot drain one.
 
+### 2.6 Watching someone else's money arrive — no wallet at all
+
+`/h/@arinza` is the recipient's public page, and the constraint that shapes it is that it
+must open with **no wallet, no passkey, no account and no setup**. The person looking at it
+is often not the person being paid: a client checking a payment is really flowing, a link
+pasted into a chat, a second screen at a demo.
+
+So it is reads-only forever. It resolves the handle on-chain, walks the stream counter
+backwards to find streams addressed to that receiving key, and polls `accrued()` for each
+active one every 300 ms — so the numbers visibly climb several times a second. Unlocking the
+receiving key is required for exactly one thing: withdrawing.
+
+This is the demo's second screen. One browser streams money out; another, with nothing
+installed and nothing connected, shows it arriving.
+
+It also refuses to be misleading about its own read model. Monad nodes do not serve arbitrary
+historic state and cap `eth_getLogs` at a 100-block range — about **30 seconds** of history at
+300 ms blocks — so event scanning cannot answer "show me my payments". The page therefore reads
+**live current state** and says so on the page itself, along with the bound: it covers the most
+recent `SCAN_WINDOW` (64) streams, and older ones need a per-recipient on-chain index or an
+Envio HyperSync indexer. Both are in `ROADMAP.md`. Disclosing the limit beats letting a judge
+discover it.
 ---
 
 ## 3. Contracts
 
-### 3.1 `src/StreamVault.sol` — 503 lines, 6,096 bytes runtime (limit 128 KB)
+### 3.1 `src/StreamVault.sol` — 503 lines, 6,783 bytes runtime (limit 128 KB)
 
 The 12-field record. Field order matters: Monad's MIP-8 warms **128 consecutive storage
 slots per page** rather than per slot, so keeping a stream's fields contiguous is why
@@ -214,7 +236,7 @@ Read off-chain with `cast` on 2026-10-07, and re-asserted against live state by 
 | Gas charged on the **declared limit**, not gas used | The UI sets explicit limits (`GAS_LIMITS`); the relayer must never let an estimate stand |
 | `eth_getLogs` capped at a **100-block range** | No historical log scanning; the RPC proxy refuses `eth_getLogs` outright |
 | Full nodes do **not** serve arbitrary historic state | The UI reads live state; an indexer (Envio HyperSync) is a post-hackathon item |
-| 128 KB contract limit | StreamVault is 6,096 bytes — ample headroom |
+| 128 KB contract limit | StreamVault is 6,783 bytes — ample headroom |
 | MIP-8 warms 128 slots per page | The 12-field struct is laid out to benefit; `accrued()` ≈ 1.9k gas |
 | `secp256r1` precompile at `0x0100` (EIP-7951) | On-chain passkey verification is possible; deferred, see ROADMAP |
 
@@ -254,11 +276,14 @@ Next.js 15.5.27 App Router · React 19 · TypeScript 5.7.2 · viem 2.37.6 · `@c
 | `lib/permit.ts` | EIP-2612 signing via `signTypedData` + `parseSignature` |
 | `lib/format.ts` | 6-decimal money formatting; integer units internally, never floats |
 | `app/api/rpc/route.ts` | Allowlisted JSON-RPC proxy |
-| `components/MonPay.tsx` | The whole flow |
+| `app/h/[handle]/page.tsx` | The recipient's public page route — `force-dynamic`, since a handle only exists on-chain |
+| `lib/scan.ts` | Handle resolution, bounded stream enumeration, and stream-phase derivation |
+| `components/RecipientView.tsx` | The public page: live accruing balances with no wallet connected |
+| `components/Moname.tsx` | The whole flow |
 
 ### 6.1 Passkeys: one passkey, three keys
 
-Mera's secret-vault API encrypts arbitrary bytes under a WebAuthn PRF output. MonPay uses it to put three keys under one passkey:
+Mera's secret-vault API encrypts arbitrary bytes under a WebAuthn PRF output. Moname uses it to put three keys under one passkey:
 
 | Key | Mera call | Can |
 |---|---|---|
@@ -383,8 +408,18 @@ corrected several times by *failing tests* rather than accepted as generated.
 | 2 | Deploy to mainnet (143) | Needs ~0.5 MON. Then record addresses **and** tx hashes in the README (§9.2 accepts either; we record both) |
 | 3 | Resolve the Agora bounty's **"mobile app"** wording | The requirement says mobile app; we build responsive web. That wording is worth 40 % of $10k. Message Agora in Discord — their CEO and CTO run the bounty and both mentor |
 | 4 | AUSD-funded flows on testnet | Real test AUSD; Agora's testnet mint is permissioned and sources conflict on whether a public faucet exists |
-| 5 | Recipient landing page | A `@handle` URL openable with no wallet at all — the strongest demo beat, not yet built |
-| 6 | Relayer service | The permit submitter. Contracts are ready (`creditArrival`, permissionless `createStreamWithPermit`); the service is not written |
-| 7 | Cross-chain inbound | Relay by default; a time-boxed CCTP V2 spike only if streaming is already solid |
-| 8 | Demo video ≤ 3 min (§9.4) | Needs 1–5 above. Test Mera on the exact demo machine first |
-| 9 | Envio HyperSync indexer | Post-hackathon; Monad nodes do not serve historic state |
+| 5 | Relayer service | The permit submitter. Contracts are ready (`creditArrival`, permissionless `createStreamWithPermit`); the service is not written |
+| 6 | Cross-chain inbound | Relay by default; a time-boxed CCTP V2 spike only if streaming is already solid |
+| 7 | Demo video ≤ 3 min (§9.4) | Needs 1–5 above. Test Mera on the exact demo machine first |
+| 8 | Envio HyperSync indexer | Post-hackathon; Monad nodes do not serve historic state |
+
+**Shipped since the last revision:** the recipient landing page (§2.6) — `/h/@handle`, read-only,
+no wallet, live `accrued()` polling at 300 ms.
+
+**Newly surfaced by building it:** `lib/scan.ts` enumerates streams with a bounded reverse walk
+of the stream counter (`SCAN_WINDOW = 64`), because Monad's `eth_getLogs` cap makes event
+scanning useless. That is O(streams ever created), not O(this recipient's streams). The fix is
+either an on-chain `mapping(address => uint256[])` index in StreamVault or an Envio indexer.
+We deliberately did **not** add the on-chain index in the final week: StreamVault is fork-tested
+against live mainnet with 58 passing tests, and that verification is worth more than a cheaper
+read. Item 8 above is now load-bearing rather than optional.

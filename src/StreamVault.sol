@@ -21,7 +21,7 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 ///      KEY MODEL ("one passkey, many keys")
 ///      - `sender`      funds the stream and may cancel it (refunding the un-accrued part)
 ///      - `recipient`   withdraws accrued funds
-///      - `controllers` an allowlist the sender sets at creation. In MonPay this is the
+///      - `controllers` an allowlist the sender sets at creation. In Moname this is the
 ///                      Mera SESSION key (passkey derivation index 1), which can only
 ///                      pause / resume / cancel. The OWNER key (index 0) signs the terms.
 ///                      The key that can move money is not the key held live in page memory.
