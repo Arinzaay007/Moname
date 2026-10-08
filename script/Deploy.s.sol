@@ -31,6 +31,21 @@ library MonameConfig {
     // Bridgeable in via CCTP V2, where Circle charges Monad 0 bps.
     address internal constant USDC_MAINNET = 0x754704Bc059F8C67012fEd69BC8A327a5aafb603;
 
+    // ---- Relay destination executor: the inbound forwarder ----------------
+    // This is the address Relay delivers bridged tokens to, and therefore the
+    // msg.sender that will call creditArrival. Found in a live /quote/v2
+    // response at output.payments[].recipient and verified on chain 143 with
+    // `cast codesize` = 4720 bytes on 2026-10-08.
+    //
+    // Setting it as the forwarder is a TRUST DECISION, not a formality: whoever
+    // holds `forwarder` can direct existing vault balance to any recipient,
+    // because creditArrival pulls nothing and only checks the vault's balance.
+    // test_creditArrival_trustBoundary_forwarderCanDirectExistingVaultBalance
+    // asserts that this succeeds, so the assumption is explicit rather than
+    // folklore. Relay's executor and solver network are better-trusted than a
+    // single key we hold, but the README must say so and not claim trustlessness.
+    address internal constant RELAY_EXECUTOR_MONAD = 0xb92fe925DC43a0ECdE6c8b1a2709c170Ec4fFf4f;
+
     /// @notice The dollar token for whichever chain we are on. AUSD first: it is the token
     /// the Agora cross-border bounty names, and it is the only dollar stablecoin that
     /// exists on both networks.
@@ -51,8 +66,12 @@ library MonameConfig {
 ///   forge script script/Deploy.s.sol:Deploy --rpc-url monad_testnet --broadcast \
 ///     --private-key $MONAD_PRIVATE_KEY
 ///
-/// Set FORWARDER_ADDRESS to the relayer. Left unset it deploys as address(0), which makes
-/// creditArrival revert ZeroAddress — no gasless path rather than an open one.
+/// Set FORWARDER_ADDRESS to whoever may call `creditArrival`. On mainnet that is Relay's
+/// destination executor, `MonameConfig.RELAY_EXECUTOR_MONAD`
+/// (0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f), which is what makes cross-chain arrivals
+/// open a stream atomically. Left unset it deploys as address(0), which makes creditArrival
+/// revert ZeroAddress — no inbound path rather than an open one. Read the trust note on that
+/// constant before setting it.
 ///
 /// ⚠️ Monad charges gas on the DECLARED limit, not gas used, so an over-estimate is real
 /// money. Pass --gas-limit and --gas-price explicitly on mainnet.

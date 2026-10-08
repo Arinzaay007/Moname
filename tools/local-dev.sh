@@ -34,11 +34,16 @@ deployed() { grep -oE "Deployed to: 0x[0-9a-fA-F]{40}" | grep -oE "0x[0-9a-fA-F]
 echo "==> deploying"
 AUSD=$(forge create test/mocks/MockAUSD.sol:MockAUSD \
   --rpc-url "$RPC" --private-key "$PK" --broadcast 2>&1 | deployed)
-# forwarder = address(0) so creditArrival fails closed, matching the production default.
-# The real forwarder address is set at deploy time on a live network.
+# Stand in for Relay's destination executor so creditArrival is LIVE locally and the
+# inbound path can actually be demoed. On mainnet this must be
+# MonameConfig.RELAY_EXECUTOR_MONAD (0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f).
+# The address is DERIVED from the key rather than hardcoded — an earlier version of this
+# script assumed an anvil account index and was wrong, which left the relayer unfunded.
+FWD_KEY=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a
+FORWARDER=$(cast wallet address --private-key "$FWD_KEY")
 VAULT=$(forge create src/StreamVault.sol:StreamVault \
   --rpc-url "$RPC" --private-key "$PK" --broadcast \
-  --constructor-args 0x0000000000000000000000000000000000000000 2>&1 | deployed)
+  --constructor-args "$FORWARDER" 2>&1 | deployed)
 REG=$(forge create src/HandleRegistry.sol:HandleRegistry \
   --rpc-url "$RPC" --private-key "$PK" --broadcast 2>&1 | deployed)
 
@@ -46,6 +51,10 @@ for pair in "MockAUSD:$AUSD" "StreamVault:$VAULT" "HandleRegistry:$REG"; do
   [ -n "${pair#*:}" ] || { echo "deploy failed for ${pair%%:*}" >&2; exit 1; }
   echo "    ${pair%%:*}  ${pair#*:}"
 done
+
+echo "    inbound forwarder  $FORWARDER  (stands in for Relay's executor)"
+# The forwarder pays gas to call creditArrival, so it needs a balance.
+cast send "$FORWARDER" --value 2ether --rpc-url "$RPC" --private-key "$PK" >/dev/null
 
 echo "==> writing apps/web/.env.local"
 # Preserve a relayer key that is already configured. Rewriting this file used to
@@ -68,6 +77,10 @@ MONAD_RPC_URL=$RPC
 # Server-side only: no NEXT_PUBLIC_ prefix, so it cannot be inlined into a client bundle.
 # This key only ever pays gas for other people's permits; it can never move their funds.
 RELAYER_PRIVATE_KEY=$RELAYER_KEY
+# Local stand-in for Relay's destination executor (0xb92fe925… on mainnet).
+# Server-side only: it calls creditArrival when a cross-chain transfer lands.
+INBOUND_FORWARDER_KEY=$FWD_KEY
+NEXT_PUBLIC_INBOUND_FORWARDER=$FORWARDER
 EOF
 
 # The relayer pays gas on other people's behalf, so it needs a balance. Fund whatever

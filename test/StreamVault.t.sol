@@ -7,6 +7,7 @@ import {StreamVault} from "../src/StreamVault.sol";
 import {HandleRegistry} from "../src/HandleRegistry.sol";
 import {MockAUSD} from "./mocks/MockAUSD.sol";
 import {MockUSDC} from "./mocks/MockUSDC.sol";
+import {MockRelayExecutor} from "./mocks/MockRelayExecutor.sol";
 
 /// @notice Moname core tests, run under Monad execution (`network = "monad"` in foundry.toml).
 ///         The accrual + pause invariants here are the evidence behind the demo claim that
@@ -572,6 +573,132 @@ contract StreamVaultTest is Test {
         vm.prank(forwarder);
         vm.expectRevert(StreamVault.ZeroAddress.selector);
         vault.creditArrival(recipient, address(ausd), AMOUNT, DURATION);
+    }
+
+    // ---------------------------------------------------------------------
+    // The Relay destination-executor pattern.
+    //
+    // The tests above use vm.prank(forwarder), which makes an EOA impersonate the
+    // forwarder. That proves the authorisation guard but not what happens in
+    // production: Relay lands bridged tokens at ITS OWN executor contract and then
+    // runs an ordered batch of destination calls in one transaction. Measured against
+    // Relay's live /quote/v2, the batch for a Moname inbound transfer is
+    //   [0] AUSD.transfer(StreamVault, amount)
+    //   [1] StreamVault.creditArrival(recipient, AUSD, amount, duration)
+    // These tests drive exactly that, through a contract, in one transaction.
+    // ---------------------------------------------------------------------
+
+    function _relayBatch(address token, address to, uint256 amt, address who, uint64 dur)
+        internal
+        pure
+        returns (MockRelayExecutor.Call[] memory calls)
+    {
+        calls = new MockRelayExecutor.Call[](2);
+        calls[0] = MockRelayExecutor.Call({
+            to: token,
+            value: 0,
+            data: abi.encodeCall(IERC20.transfer, (to, amt))
+        });
+        calls[1] = MockRelayExecutor.Call({
+            to: to,
+            value: 0,
+            data: abi.encodeCall(StreamVault.creditArrival, (who, token, uint128(amt), dur))
+        });
+    }
+
+    /// @dev The real inbound flow: bridge fill lands at the executor, one transaction
+    ///      moves it into the vault and opens the stream.
+    function test_creditArrival_relayExecutorPattern_opensStreamInOneTransaction() public {
+        MockRelayExecutor exec = new MockRelayExecutor();
+        vault.setForwarder(address(exec)); // owner is address(this) in setUp
+        ausd.mint(address(exec), AMOUNT); // Relay's solver has filled
+
+        uint256 expectedId = vault.nextId();
+        exec.execute(_relayBatch(address(ausd), address(vault), AMOUNT, recipient, DURATION));
+
+        S memory c = _s(expectedId); // creditArrival does id = nextId++
+        assertEq(c.recipient, recipient);
+        assertEq(c.sender, recipient, "arrival-credited stream sets sender to the recipient");
+        assertEq(c.amount, AMOUNT);
+        assertEq(ausd.balanceOf(address(vault)), AMOUNT, "the vault holds the bridged funds");
+        assertEq(ausd.balanceOf(address(exec)), 0, "the executor is left holding nothing");
+        assertEq(vault.nextId(), expectedId + 1);
+    }
+
+    /// @dev The two calls cannot be swapped. creditArrival deliberately performs no
+    ///      transferFrom, so it must run AFTER the tokens move — and because the batch
+    ///      is one transaction, a wrong order rolls back the transfer too rather than
+    ///      leaving tokens stranded in the vault with no stream.
+    function test_creditArrival_relayExecutorPattern_callOrderIsLoadBearing() public {
+        MockRelayExecutor exec = new MockRelayExecutor();
+        vault.setForwarder(address(exec));
+        ausd.mint(address(exec), AMOUNT);
+
+        MockRelayExecutor.Call[] memory calls = new MockRelayExecutor.Call[](2);
+        calls[0] = MockRelayExecutor.Call({ // credit FIRST — wrong
+            to: address(vault),
+            value: 0,
+            data: abi.encodeCall(StreamVault.creditArrival, (recipient, address(ausd), AMOUNT, DURATION))
+        });
+        calls[1] = MockRelayExecutor.Call({
+            to: address(ausd),
+            value: 0,
+            data: abi.encodeCall(IERC20.transfer, (address(vault), AMOUNT))
+        });
+
+        uint256 before = vault.nextId();
+        vm.expectRevert(StreamVault.ExceedsWithdrawable.selector);
+        exec.execute(calls);
+
+        // Atomic: nothing half-happened.
+        assertEq(vault.nextId(), before, "no stream was created");
+        assertEq(ausd.balanceOf(address(vault)), 0, "the transfer rolled back with it");
+        assertEq(ausd.balanceOf(address(exec)), AMOUNT, "funds are still with the executor");
+    }
+
+    /// @dev Documents the trust this design creates rather than leaving it as folklore.
+    ///      Whoever holds `forwarder` can point EXISTING vault balance at any recipient,
+    ///      because creditArrival only checks that the vault holds the tokens and pulls
+    ///      nothing. Setting Relay's executor as the forwarder therefore trusts Relay's
+    ///      executor and its solver network. Better-trusted than a single key we hold,
+    ///      but a real assumption, and it is why this is a test and not a comment.
+    function test_creditArrival_trustBoundary_forwarderCanDirectExistingVaultBalance() public {
+        ausd.mint(address(vault), AMOUNT); // already in the vault from an unrelated stream
+
+        MockRelayExecutor exec = new MockRelayExecutor();
+        vault.setForwarder(address(exec));
+
+        MockRelayExecutor.Call[] memory calls = new MockRelayExecutor.Call[](1);
+        calls[0] = MockRelayExecutor.Call({
+            to: address(vault),
+            value: 0,
+            // stranger is nobody in this flow, yet the forwarder can name them
+            data: abi.encodeCall(StreamVault.creditArrival, (stranger, address(ausd), AMOUNT, DURATION))
+        });
+
+        uint256 id = vault.nextId();
+        exec.execute(calls);
+        assertEq(_s(id).recipient, stranger, "this succeeding IS the trust assumption");
+        assertEq(ausd.balanceOf(address(vault)), AMOUNT, "nothing was pulled; the balance was redirected");
+    }
+
+    /// @dev A single-call batch is what a CCTP V2 hook would send if the tokens were
+    ///      delivered straight to the vault. Both rails must work through the same guard.
+    function test_creditArrival_worksWhenTokensAreAlreadyInTheVault() public {
+        MockRelayExecutor exec = new MockRelayExecutor();
+        vault.setForwarder(address(exec));
+        ausd.mint(address(vault), AMOUNT); // delivered to the vault directly
+
+        MockRelayExecutor.Call[] memory calls = new MockRelayExecutor.Call[](1);
+        calls[0] = MockRelayExecutor.Call({
+            to: address(vault),
+            value: 0,
+            data: abi.encodeCall(StreamVault.creditArrival, (recipient, address(ausd), AMOUNT, DURATION))
+        });
+
+        uint256 id = vault.nextId();
+        exec.execute(calls);
+        assertEq(_s(id).recipient, recipient);
     }
 
     // =====================================================================
