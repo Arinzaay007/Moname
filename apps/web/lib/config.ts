@@ -83,13 +83,25 @@ export function tokensFor(chainId: number): DollarToken[] {
 // ---------------------------------------------------------------------------
 // Moname contract addresses
 //
-// Empty until deployed. Set these in .env.local after running:
-//   forge script script/Deploy.s.sol:Deploy --rpc-url monad --broadcast
-// The deploy script prints the addresses; paste them here or into the env.
+// Monad MAINNET (chain 143), deployed 2026-10-08. Addresses and deploy tx hashes are
+// recorded in DEPLOYMENT.md at the repo root, written by tools/deploy-mainnet.sh from
+// the forge broadcast record rather than transcribed from console output.
 //
-// The app refuses to pretend it is connected when these are unset, and shows the
-// reason — a judge must never be shown a mockup that looks live. See §9.1.
+// These are baked in as defaults for mainnet mode only, so a fresh clone runs against
+// the real deployment without anyone hunting for env vars. NEXT_PUBLIC_* still takes
+// precedence, which is how local and testnet modes point elsewhere.
+//
+// In local or testnet mode with no env set, these defaults deliberately DO NOT apply:
+// the app refuses to pretend it is connected when the addresses are unset and shows the
+// reason, because a judge must never be shown a mockup that looks live. See §9.1.
 // ---------------------------------------------------------------------------
+
+/** Monad mainnet deployment, chain 143, 2026-10-08. Verified by re-reading the chain
+ *  after deploy: codesize 6783 and 1927, matching the compiled artifacts exactly. */
+const MAINNET_DEPLOYMENT = {
+  streamVault: "0x2c0dd3385d545d54d7185432365917abfd62e52f",
+  handleRegistry: "0x87dbd64e79e11510223299600f8d67428f82e710",
+} as const;
 
 export type Deployment = {
   streamVault: `0x${string}` | undefined;
@@ -101,9 +113,16 @@ function addr(v: string | undefined): `0x${string}` | undefined {
   return v as `0x${string}`;
 }
 
+const chainEnv = (process.env.NEXT_PUBLIC_CHAIN ?? "mainnet").toLowerCase();
+const useMainnetDefaults = chainEnv === "mainnet" || chainEnv === "";
+
 export const deployment: Deployment = {
-  streamVault: addr(process.env.NEXT_PUBLIC_STREAM_VAULT),
-  handleRegistry: addr(process.env.NEXT_PUBLIC_HANDLE_REGISTRY),
+  streamVault:
+    addr(process.env.NEXT_PUBLIC_STREAM_VAULT) ??
+    (useMainnetDefaults ? addr(MAINNET_DEPLOYMENT.streamVault) : undefined),
+  handleRegistry:
+    addr(process.env.NEXT_PUBLIC_HANDLE_REGISTRY) ??
+    (useMainnetDefaults ? addr(MAINNET_DEPLOYMENT.handleRegistry) : undefined),
 };
 
 export const isDeployed = Boolean(deployment.streamVault && deployment.handleRegistry);

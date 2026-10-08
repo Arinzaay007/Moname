@@ -261,12 +261,31 @@ All values read off-chain with `cast` on 2026-10-07 and re-asserted by the fork 
 
 ### Deployments
 
-| Network | Chain ID | StreamVault | HandleRegistry | Deploy tx |
-|---|---|---|---|---|
-| **Monad Mainnet** | 143 | _pending_ | _pending_ | _pending_ |
-| Monad Testnet | 10143 | _pending_ | _pending_ | _pending_ |
+**Monad mainnet, chain 143 — deployed 2026-10-08.** Full record with monadscan links in [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
-Mainnet dry-run on 2026-10-07 predicted both addresses and cost **0.495385002 MON** (2,452,401 gas at a 100 gwei base fee). §9.2 accepts contract addresses *or* tx hashes; we record both.
+| Contract | Address | Deploy tx | Gas used |
+|---|---|---|---|
+| `StreamVault` | `0x2c0dd3385d545d54d7185432365917abfd62e52f` | `0xb39315ae2e37f1446c24e8a6a9a2eb7b8036a0c80857b31812477670aeb71c86` | 2,055,086 |
+| `HandleRegistry` | `0x87dbd64e79e11510223299600f8d67428f82e710` | `0xe34c8097da6ecbf8e5273da45a68f09e67dbeac40421d9e8ea100f3c325d3485` | 617,203 |
+
+| | |
+|---|---|
+| Total gas | **2,672,289** — exactly the pre-deploy dry-run estimate |
+| Actual cost | **0.272573478 MON** (100 gwei base fee + 2 gwei priority) |
+| Runtime sizes on chain | StreamVault **6,783 B**, HandleRegistry **1,927 B** — byte-identical to the compiled artifacts |
+| `StreamVault.forwarder()` | `0xb92fe925DC43a0ECdE6c8b1a2709c170Ec4fFf4f` — Relay's destination executor |
+| `StreamVault.owner()` | `0x0d362Cf9443D6C2FF7Faa20C11111702e7099FC6` (deployer) |
+| Verified after deploy | `nextId()` = 0, `isRegistered("arinza")` = false, `resolve("nosuchhandle")` reverts `HandleNotRegistered` — fails closed as designed |
+
+§9.2 accepts contract addresses *or* tx hashes; both are recorded. A figure of 0.495385002 MON for 2,452,401 gas appeared in an earlier revision of this README and was never internally consistent — those numbers do not correspond at any gas price. It is replaced above with the measured spend.
+
+Monad testnet (10143) is not deployed; the local anvil path in [Running it without a mainnet deployment](#running-it-without-a-mainnet-deployment) covers development.
+
+### Owner privileges, stated exactly
+
+`StreamVault`'s owner has **one** power: `setForwarder`. It cannot pause, cancel, withdraw, or appoint controllers — those are gated on the stream's sender or its controllers. There is **no `transferOwnership`**, so ownership is permanently the deployer address above.
+
+The consequence of a compromised owner key is therefore narrow but real: an attacker could install themselves as `forwarder` and redirect *future* cross-chain arrivals. They could not touch existing streams. Recorded here rather than left implicit, because it is the kind of thing a reviewer should not have to read the source to find.
 
 ### Proven against live mainnet, not just mocks
 

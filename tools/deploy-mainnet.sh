@@ -57,13 +57,15 @@ echo "    gas price       $(python3 -c "print(f'{$GAS_PRICE/1e9:.2f}')") gwei"
 
 echo
 echo "==> compiling"
-forge build 2>&1 | grep -iE "^Error|Compiler run" | head -3
+{ forge build 2>&1 | grep -iE "^Error|Compiler run" | head -3; } || true
 
 echo
 echo "==> simulating"
+set +e
 FORWARDER_ADDRESS="$FORWARDER" forge script script/Deploy.s.sol:Deploy --rpc-url monad \
   --private-key "$MONAD_PRIVATE_KEY" --gas-price "$GAS_PRICE" 2>&1 | \
-  grep -E "StreamVault:|HandleRegistry:|forwarder:|primary token:|Estimated total gas|Estimated amount" | sed 's/^/    /'
+  grep -E "StreamVault:|HandleRegistry:|forwarder:|primary token:|Estimated total gas|Estimated amount|Error" | sed 's/^/    /'
+set -e
 
 if [ "$BROADCAST" != "1" ]; then
   echo
@@ -135,7 +137,7 @@ import json
 run=json.load(open('$RUN'))
 for t in run.get('transactions',[]):
     if t.get('contractName')=='StreamVault': print(t.get('contractAddress')); break
-")
+") || true
 if [ -n "$VAULT" ]; then
   printf "    %-16s forwarder() = %s\n" "StreamVault" "$(cast call "$VAULT" 'forwarder()(address)' --rpc-url "$RPC")"
   printf "    %-16s nextId()    = %s\n" "" "$(cast call "$VAULT" 'nextId()(uint256)' --rpc-url "$RPC")"
