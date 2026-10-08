@@ -278,7 +278,11 @@ Mainnet dry-run on 2026-10-07 predicted both addresses and cost **0.495385002 MO
 
 Required by Metropolis T&Cs §4.1.4, stated plainly.
 
-**WinkPay is my payments business.** It runs on Tempo. Tempo cannot do what I want next: per-second streaming is uneconomic on a ~1 s chain, and cross-border inbound cost 2.5% on small transfers. Monad can — 300 ms blocks, deterministic finality at ~600 ms, native Circle USDC, and CCTP V2 where Circle charges Monad 0 bps because its finality is already fast enough. So the cross-border streaming layer of the business is being built on Monad.
+**WinkPay is my payments business.** It runs on Tempo. Tempo cannot do what I want next: per-second streaming is uneconomic on a ~1 s chain. Monad can — 300 ms blocks, deterministic finality at ~600 ms, and Circle's own docs mark Monad's CCTP **Fast Transfer as N/A** because "a standard transfer is as efficient as a fast transfer" on it. Monad's finality is already fast enough that Circle does not sell it an express lane. So the cross-border streaming layer of the business is being built on Monad.
+
+**Inbound corridors are measured, not assumed.** WinkPay supports 13 source chains into Tempo. Probing Relay's live quote API for each of those same chains into **Monad 143** (`tools/probe-13-chains.py`, `tools/probe-nonevm-corridors.py`) shows **12 of the 13 route in**, each delivering both USDC and AUSD: Base, Ethereum, Arbitrum, Optimism, Polygon, BSC, Solana, Avalanche, Celo, TON, Robinhood Chain and Plasma. Delivering exactly 100 costs ~**3¢** as USDC or ~**9¢** as AUSD from the EVM corridors — the extra 6¢ is Relay performing the USDC→AUSD swap on Monad — and **0.043% / 0.087%** from Solana. **X Layer is the one genuine gap**, returning `NO_SWAP_ROUTES_FOUND`.
+
+Relay also accepts a **destination contract call** into Monad via its `txs[]` parameter, verified by quoting Base→Monad with `creditArrival`'s calldata and reading it back embedded in `output.calls` by selector. With `EXACT_OUTPUT` the delivered amount is fixed (`minimumAmount == expectedAmount`), so the amount baked into the calldata is exactly what lands and **no proxy contract is needed**. That makes the inbound leg atomic: tokens arrive and the stream opens in one transaction, with no watcher and no polling. The contract required no changes for this — `creditArrival` already fit.
 
 **Pre-existing components used as a foundation** (off-chain only):
 - payments orchestration patterns — bridge route quoting, a reconciler loop, a multi-chain watcher
@@ -323,6 +327,12 @@ Versions are read from each vendored copy's own `package.json`, and licences fro
 These were originally added as pinned submodules and were converted to vendored copies before publication. The upstream commit SHAs from that pin are no longer verifiable in the build environment, so they are deliberately **not** quoted here; the committed tree in `lib/` is the authoritative copy and the version numbers above are what it declares.
 
 No other third-party code is included. All Solidity in `src/` is original to this submission.
+
+## Repository history — one disclosed gap
+
+The commit history covers the build window but is coarser in one place than it should be. A commit was lost when the build environment wiped `.git`, and its work is folded into the following commit (`0b8fec6`, the rename to Moname) instead of standing alone. **All of those files are present and correct**; only the granularity is missing. Nothing was reconstructed and no commit was back-dated — the dates are the real ones.
+
+Two commit messages still say "MonPay". That is accurate: they predate `0b8fec6`, which is the rename. They have deliberately not been rewritten, because rewriting them would misrepresent the sequence.
 
 ## Licence
 
