@@ -1,6 +1,6 @@
 # Moname
 
-**Repository:** <https://github.com/Arinzaay007/Moname> · MIT · Monad Metropolis, Track 2 — Consumer Products & Payments
+**Repository:** <https://github.com/Arinzaay007/Moname> · MIT licensed
 
 **Money that arrives from anywhere and streams in by the second, in Agora's AUSD, on Monad mainnet.**
 
