@@ -28,6 +28,30 @@ import type { LocalAccount } from "viem";
  * Mera's own docs note that vaults encrypted with one reused PRF output share an encryption
  * key, so each secret needs a fresh salt. createSecretVaultWith{New,Existing}Passkey both
  * generate a fresh random salt internally, so this module never manages salts itself.
+ *
+ * ---------------------------------------------------------------------------
+ * LAZY ONBOARDING — why signup is one prompt and not three
+ * ---------------------------------------------------------------------------
+ * Each Mera ceremony shows a user-verification prompt, and Mera documents that the
+ * requirement "is not configurable": createSecretVaultWithNewPasskey shows one (two on
+ * authenticators that do not evaluate PRF at creation), and every
+ * createSecretVaultWithExistingPasskey shows one more.
+ *
+ * Creating all three keys up front therefore costs THREE or FOUR prompts at signup for
+ * keys most users never touch. But a recipient needs exactly one of them to get paid:
+ *
+ *   receiving  needed at signup — it is what a handle resolves to
+ *   owner      needed only to PAY someone
+ *   session    needed only to pause / resume / cancel a stream
+ *
+ * So onboard() creates the passkey and the receiving key only, and ensureKey() creates
+ * owner or session on first use. Signup drops from 3-4 prompts to 1-2.
+ *
+ * Mera does export no-ceremony primitives (createSecretVault, decryptSecretVault) that
+ * would allow ONE prompt to key all three vaults, but they are not reachable: the package
+ * root does not re-export them and the exports map blocks subpath imports, so using them
+ * would mean reimplementing their AES-256-GCM vault format against undocumented internals.
+ * Verified at runtime, not assumed. Not worth it for a payments product.
  */
 
 export type KeyRole = "owner" | "session" | "receiving";
@@ -76,8 +100,31 @@ export function storedKeys(): { role: KeyRole; address: string }[] {
   }));
 }
 
+/** True once any key exists. Was owner-only, which broke when onboarding stopped
+ *  creating the owner key first. */
 export function hasPasskey(): boolean {
-  return Boolean(readStore().owner);
+  const store = readStore();
+  return Boolean(store.receiving || store.owner || store.session);
+}
+
+/** Whether one specific role has been created yet. Drives the UI's "not created yet"
+ *  state so a user is never offered an unlock for a key that does not exist. */
+export function hasKey(role: KeyRole): boolean {
+  return Boolean(readStore()[role]);
+}
+
+/**
+ * The credential behind whichever passkey already exists, read from any stored vault.
+ * Every PasskeySecretVault carries its own credential metadata, so adding a later key
+ * needs no separate record of the creation ceremony and no unexported helper.
+ */
+function existingCredential() {
+  const store = readStore();
+  for (const role of ["receiving", "owner", "session"] as KeyRole[]) {
+    const entry = store[role];
+    if (entry?.vault?.credential) return entry.vault.credential;
+  }
+  return undefined;
 }
 
 /**
@@ -107,39 +154,32 @@ function newKeyBytes(): { privateKey: `0x${string}`; secret: Uint8Array; address
 }
 
 /**
- * Creates the passkey and the owner key in one ceremony, then derives the session and
- * receiving keys under the SAME passkey. One prompt per key, one passkey total.
+ * Creates the passkey and the RECEIVING key only. One ceremony, so one
+ * user-verification prompt (two on authenticators that do not evaluate PRF at creation).
+ *
+ * The owner and session keys are created on first use by ensureKey(). Deliberately not
+ * created here: a recipient who only ever gets paid never needs them, and minting keys
+ * nobody asked for costs prompts and adds material to lose.
+ *
+ * The receiving key is NOT returned unlocked. It can move money out of a stream, and the
+ * point of the three-key split is that a money-moving key is not silently live in page
+ * memory from the moment of signup.
  */
-export async function onboard(displayName: string): Promise<{ owner: string; session: string; receiving: string }> {
+export async function onboard(displayName: string): Promise<{ receiving: string }> {
   const rp = relyingParty();
-  const store: VaultStore = {};
+  const k = newKeyBytes();
 
-  // 1. Owner key — this call creates the passkey itself.
-  const ownerKey = newKeyBytes();
-  const ownerVault = await createSecretVaultWithNewPasskey({
+  const vault = await createSecretVaultWithNewPasskey({
     rp,
     user: { name: displayName, displayName },
-    secret: ownerKey.secret,
+    secret: k.secret,
   });
-  store.owner = { vault: ownerVault, address: ownerKey.address };
 
-  // 2 + 3. Session and receiving keys, added under the existing passkey.
-  for (const role of ["session", "receiving"] as KeyRole[]) {
-    const k = newKeyBytes();
-    const vault = await createSecretVaultWithExistingPasskey({
-      rpId: rp.id,
-      credential: ownerVault.credential,
-      secret: k.secret,
-    });
-    store[role] = { vault, address: k.address };
-  }
-
+  const store = readStore();
+  store.receiving = { vault, address: k.address };
   writeStore(store);
-  return {
-    owner: store.owner!.address,
-    session: store.session!.address,
-    receiving: store.receiving!.address,
-  };
+
+  return { receiving: k.address };
 }
 
 export type UnlockedKey = {
@@ -152,6 +192,64 @@ export type UnlockedKey = {
 };
 
 /**
+ * Creates a key that does not exist yet, under the passkey that already does.
+ * One user-verification prompt. Returns the address; the key is not left live.
+ */
+export async function addKey(role: KeyRole): Promise<string> {
+  const store = readStore();
+  if (store[role]) return store[role]!.address; // already exists — no prompt at all
+
+  const credential = existingCredential();
+  if (!credential) throw new Error("No passkey yet. Create one first.");
+
+  const k = newKeyBytes();
+  const vault = await createSecretVaultWithExistingPasskey({
+    rpId: relyingPartyId(),
+    credential,
+    secret: k.secret,
+  });
+  store[role] = { vault, address: k.address };
+  writeStore(store);
+  return k.address;
+}
+
+/**
+ * Get a role's key usable, costing EXACTLY ONE prompt either way.
+ *
+ * If the vault already exists, decrypt it (one assertion ceremony). If it does not,
+ * create it — and because the private key was just generated locally and is still in
+ * memory, return it live instead of spending a SECOND ceremony decrypting a vault we
+ * wrote a moment ago.
+ *
+ * That is a deliberate trade against the "money-moving keys are not live in page memory"
+ * rule above: the caller has just explicitly asked to use this key, and the session is
+ * ended by the caller's cleanup. One prompt instead of two is the difference between
+ * onboarding that feels like an email signup and onboarding that does not.
+ */
+export async function ensureKey(role: KeyRole): Promise<UnlockedKey> {
+  const store = readStore();
+  if (store[role]) return unlock(role);
+
+  const credential = existingCredential();
+  if (!credential) throw new Error("No passkey yet. Create one first.");
+
+  const k = newKeyBytes();
+  const vault = await createSecretVaultWithExistingPasskey({
+    rpId: relyingPartyId(),
+    credential,
+    secret: k.secret,
+  });
+  store[role] = { vault, address: k.address };
+  writeStore(store);
+
+  // Same construction as unlock(), but from the key just generated rather than from a
+  // decrypted one — which is what saves the second ceremony.
+  const session = createSecp256k1SigningSession({ privateKey: k.secret });
+  const account = toViemAccount(session);
+  return { role, address: account.address, account, session, end: () => session.end() };
+}
+
+/**
  * Unlocks one key with a passkey prompt and returns a viem account backed by it.
  *
  * `toViemAccount` signs digests with the live session key, so signing itself never shows a
@@ -161,7 +259,7 @@ export type UnlockedKey = {
 export async function unlock(role: KeyRole): Promise<UnlockedKey> {
   const store = readStore();
   const entry = store[role];
-  if (!entry) throw new Error(`No ${role} key stored. Onboard first.`);
+  if (!entry) throw new Error(`No ${role} key yet — call ensureKey("${role}") to create it under your existing passkey.`);
 
   const secret = await decryptSecretVaultWithPasskey({ rpId: relyingPartyId(), vault: entry.vault });
   const session = createSecp256k1SigningSession({ privateKey: secret });

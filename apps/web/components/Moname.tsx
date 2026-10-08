@@ -9,7 +9,7 @@ import {
 } from "@/lib/config";
 import { formatDollars, parseDollars, percentOf, shortAddress } from "@/lib/format";
 import {
-  onboard, unlock, storedKeys, hasPasskey, explainMeraError, secureContextProblem, KEY_ROLES,
+  onboard, ensureKey, storedKeys, hasPasskey, explainMeraError, secureContextProblem, KEY_ROLES,
   type KeyRole, type UnlockedKey,
 } from "@/lib/mera";
 import { signPermit, permitNonce } from "@/lib/permit";
@@ -161,21 +161,31 @@ export default function Moname() {
     return () => { unlocked.end(); };
   }, [unlocked, chain]);
 
+  /**
+   * ensureKey rather than unlock: if this role has not been created yet it is created
+   * under the existing passkey and returned live, so first use costs ONE prompt instead
+   * of a create ceremony followed by a decrypt ceremony. Refreshes the stored-key list
+   * because a creation just added to it.
+   */
   const doUnlock = useCallback(async (role: KeyRole) => {
     setBusy(`unlock-${role}`);
+    const existed = keys.some((k) => k.role === role);
     try {
-      const k = await unlock(role);
+      const k = await ensureKey(role);
       setUnlocked(k);
-      flash(`${role} key unlocked. Signing from here needs no further passkey prompt.`);
+      setKeys(storedKeys());
+      flash(existed
+        ? `${role} key unlocked. Signing from here needs no further passkey prompt.`
+        : `${role} key created under your passkey and unlocked — one prompt for both.`);
     } catch (e) { fail(e); } finally { setBusy(null); }
-  }, []);
+  }, [keys]);
 
   const doOnboard = useCallback(async () => {
     setBusy("onboard");
     try {
       const created = await onboard(handle.trim() || "moname-user");
       setKeys(storedKeys());
-      flash(`Passkey created. Three keys under one passkey — owner ${shortAddress(created.owner)}, session ${shortAddress(created.session)}, receiving ${shortAddress(created.receiving)}.`);
+      flash(`Passkey created. Your receiving key is ${shortAddress(created.receiving)} — that is what a handle will resolve to. The owner and session keys are added the first time you need them, not now.`);
     } catch (e) { fail(e); } finally { setBusy(null); }
   }, [handle]);
 
@@ -345,7 +355,7 @@ export default function Moname() {
       </header>
       <p className="sub">
         Money that arrives from anywhere and streams in by the second, in Agora&apos;s AUSD.
-        One passkey, three keys, no seed phrase, no gas.
+        One passkey, no seed phrase, no gas — and only the keys you actually use.
       </p>
 
       {!ready && <div className="banner warn">Connecting to Monad through <code>/api/rpc</code>…</div>}
@@ -364,7 +374,7 @@ export default function Moname() {
 
       <div className="grid">
         <section className="panel">
-          <h2>1 · One passkey, three keys</h2>
+          <h2>1 · One passkey, your keys</h2>
           {!hasPasskey() ? (
             <>
               <label>Display name for the passkey</label>
@@ -375,8 +385,11 @@ export default function Moname() {
                 </button>
               </div>
               <p className="small muted" style={{ marginTop: 10 }}>
-                Three separate keys are encrypted under one passkey. The key that can move
-                money is not the one left in page memory.
+                One prompt creates your passkey and your <b>receiving</b> key — the address a
+                handle resolves to. The <b>owner</b> key (to pay someone) and the
+                <b>session</b> key (to pause or cancel) are created the first time you use
+                them, each in the same single prompt. Nothing is minted that you have not
+                asked for.
               </p>
             </>
           ) : (
@@ -388,14 +401,22 @@ export default function Moname() {
                     <div>
                       <div className="role">{label}</div>
                       <div className="can">{can}</div>
-                      {k && <div className="mono small muted">{k.address}</div>}
+                      {k
+                        ? <div className="mono small muted">{k.address}</div>
+                        : <div className="small muted">not created yet — one prompt when you need it</div>}
                     </div>
                     <button
                       className="small ghost"
-                      disabled={busy !== null || !k}
+                      disabled={busy !== null}
                       onClick={() => doUnlock(role)}
                     >
-                      {unlocked?.role === role ? "unlocked" : busy === `unlock-${role}` ? "…" : "Unlock"}
+                      {unlocked?.role === role
+                        ? "unlocked"
+                        : busy === `unlock-${role}`
+                          ? "…"
+                          : k
+                            ? "Unlock"
+                            : "Create & unlock"}
                     </button>
                   </div>
                 );

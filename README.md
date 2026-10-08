@@ -214,21 +214,29 @@ Finding those streams is the interesting constraint. Monad nodes do not serve ar
 
 That is O(streams ever created) rather than O(this recipient's streams), bounded by `SCAN_WINDOW = 64`, and the page says so on itself instead of hiding it. The fixes are an on-chain per-recipient index or an Envio HyperSync indexer — see ROADMAP.md. We chose not to modify StreamVault in the final week to add the former: it is fork-tested against live mainnet with 58 passing tests, and that verification is worth more than a cheaper read.
 
-### Passkeys: one passkey, three keys
+### Passkeys: one passkey, keys created on demand
 
-`lib/mera.ts` uses Mera's secret-vault API to put **three separate keys under one passkey**:
+`lib/mera.ts` uses Mera's secret-vault API to put **separate keys under one passkey**, each with a different power:
 
-| Key | Created with | Can |
+| Key | Created | Can |
 |---|---|---|
-| owner | `createSecretVaultWithNewPasskey` (this is the ceremony that creates the passkey) | fund streams, set terms, appoint controllers |
-| session | `createSecretVaultWithExistingPasskey` | `pause` / `resume` / `cancel` — registered as a StreamVault controller, so it cannot withdraw or change terms |
-| receiving | `createSecretVaultWithExistingPasskey` | be paid; what `@handle` resolves to |
+| **receiving** | **at signup**, via `createSecretVaultWithNewPasskey` (the ceremony that creates the passkey) | be paid; what `@handle` resolves to; withdraw accrued funds |
+| owner | on first use, via `createSecretVaultWithExistingPasskey` | fund streams, set terms, appoint controllers |
+| session | on first use, via `createSecretVaultWithExistingPasskey` | `pause` / `resume` / `cancel` — registered as a StreamVault controller, so it cannot withdraw or change terms |
 
-`toViemAccount` signs digests with the live session key, so **only the unlock shows a passkey prompt** — after that, signing is silent, which is what makes a per-second streaming UI usable. `session.end()` zeroes the key irreversibly.
+**Why lazy.** Every Mera ceremony shows a user-verification prompt, and Mera documents that the requirement *"is not configurable"* — `createSecretVaultWithNewPasskey` shows one (two on authenticators that do not evaluate PRF at creation) and each `createSecretVaultWithExistingPasskey` shows one more. Creating all three up front therefore cost **three or four prompts at signup** for keys most users never touch. A recipient needs exactly one of them to get paid. Signup is now **1–2 prompts**.
+
+`ensureKey(role)` costs **exactly one prompt either way**: if the vault exists it decrypts it; if not it creates it and returns it live, because the private key was just generated locally and is still in memory — spending a second ceremony to decrypt a vault written a moment ago would be pure friction.
+
+`toViemAccount` signs digests with the live session key, so **only the unlock shows a prompt** — after that, signing is silent, which is what makes a per-second streaming UI usable. `session.end()` zeroes the key irreversibly.
+
+**One prompt for all three is not available honestly.** Mera does export no-ceremony primitives (`createSecretVault`, `decryptSecretVault`) that would let a single PRF output key all three vaults. They are unreachable: the package root does not re-export them and the `exports` map (`.`, `./viem`, `./react-native-webauthn-client`) blocks subpath imports. Verified at runtime, not assumed. Using them would mean reimplementing Mera's AES-256-GCM vault format against undocumented internals, which is not a trade worth making in a payments product.
 
 Mera's two ceremonies take different argument shapes: creation wants `rp: { id, name }`, assertion wants a bare `rpId: string`. `lib/mera.ts` is typechecked against the real package before any UI is built on it, which is how that got caught.
 
 `PRF_UNAVAILABLE` gets a plain-English explanation in the UI rather than a stack trace: on desktop Chrome only passkeys saved to **Google Password Manager** return a PRF output, and a passkey in the browser's local profile will fail. This is documented as the most common setup failure, so it is handled rather than discovered mid-demo.
+
+**Unverified: whether PRF survives passkey sync to a new device.** Passkeys sync via iCloud Keychain and Google Password Manager, so in principle a Mera vault follows a user to a new phone. But Mera needs the WebAuthn PRF extension, and PRF is already known to be fragile on desktop Chrome. Cross-device recovery is therefore *plausible but untested*, and should be tested on two real devices before being promised to anyone. This is the one place where an email-based custodial wallet has a genuine advantage over a passkey.
 
 ### Running it without a mainnet deployment
 

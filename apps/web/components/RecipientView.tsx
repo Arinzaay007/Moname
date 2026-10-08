@@ -26,7 +26,7 @@ import {
   type StreamPhase,
   type StreamRow,
 } from "@/lib/scan";
-import { explainMeraError, hasPasskey, secureContextProblem, storedKeys, unlock, type UnlockedKey } from "@/lib/mera";
+import { ensureKey, explainMeraError, hasPasskey, secureContextProblem, storedKeys, type UnlockedKey } from "@/lib/mera";
 
 /**
  * The recipient's public page: /h/@handle
@@ -232,7 +232,9 @@ export default function RecipientView({ rawHandle }: { rawHandle: string }) {
     setBusy("unlock");
     setError(null);
     try {
-      const k = await unlock("receiving");
+      // ensureKey, not unlock: costs the same single prompt, but also covers a
+      // stored vault set that predates lazy onboarding or lacks a receiving key.
+      const k = await ensureKey("receiving");
       setReceiving(k);
       setNotice("Receiving key unlocked. You can withdraw now.");
     } catch (e) {
@@ -446,7 +448,7 @@ export default function RecipientView({ rawHandle }: { rawHandle: string }) {
               <>
                 <div className="muted" style={{ marginTop: 6 }}>
                   Watching this page needs nothing at all. Moving money needs the{" "}
-                  <strong>receiving key</strong> — the one of three keys that your passkey
+                  <strong>receiving key</strong> — the key your passkey
                   protects and that <code>@{handle}</code> resolves to.
                 </div>
                 {localReceivingKey ? (
