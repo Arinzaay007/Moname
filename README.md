@@ -311,14 +311,16 @@ Explicitly **cut** so the demo is real rather than broad: payroll, payment walls
 
 ## Third-party code
 
-Both dependencies are pinned git submodules, not vendored copies, so the exact upstream commit is auditable from `.gitmodules`:
+Both dependencies are **vendored** — committed directly into `lib/` rather than referenced as git submodules. That is deliberate: a plain `git clone` builds, with no `--recurse-submodules`, no network fetch and no chance of a pinned upstream commit disappearing. It costs ~900 small text files in the repository and buys reproducibility, which matters more here.
 
-| Dependency | Version | Commit | Licence | Used for |
-|---|---|---|---|---|
-| [OpenZeppelin Contracts](https://github.com/OpenZeppelin/openzeppelin-contracts) | v5.4.0 | `c64a1edb67b6e3f4a15cca8909c9482ad33a02b0` | MIT | `SafeERC20`, `ReentrancyGuardTransient`, `Ownable` |
-| [forge-std](https://github.com/foundry-rs/forge-std) | v1.17.0 | `f3dae6e6ee381f25eb6a246f7da9b85c91a68219` | MIT / Apache-2.0 | test harness only |
+| Dependency | Version | Licence | Used for |
+|---|---|---|---|
+| [OpenZeppelin Contracts](https://github.com/OpenZeppelin/openzeppelin-contracts) | 5.4.0 | MIT | `SafeERC20`, `ReentrancyGuardTransient`, `Ownable`, `ERC20Permit` (test mock) |
+| [forge-std](https://github.com/foundry-rs/forge-std) | 1.17.0 | MIT **or** Apache-2.0 | test harness only; not in `src/` |
 
-Clone with `git clone --recurse-submodules`, or run `git submodule update --init --recursive` afterwards.
+Versions are read from each vendored copy's own `package.json`, and licences from the `LICENSE` files committed alongside them — not from memory or a README elsewhere. forge-std ships both `LICENSE-MIT` and `LICENSE-APACHE`.
+
+These were originally added as pinned submodules and were converted to vendored copies before publication. The upstream commit SHAs from that pin are no longer verifiable in the build environment, so they are deliberately **not** quoted here; the committed tree in `lib/` is the authoritative copy and the version numbers above are what it declares.
 
 No other third-party code is included. All Solidity in `src/` is original to this submission.
 
