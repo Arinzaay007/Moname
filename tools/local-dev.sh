@@ -48,24 +48,35 @@ for pair in "MockAUSD:$AUSD" "StreamVault:$VAULT" "HandleRegistry:$REG"; do
 done
 
 echo "==> writing apps/web/.env.local"
+# Preserve a relayer key that is already configured. Rewriting this file used to
+# silently delete it, which left the relay unconfigured and quietly turned the
+# "gasless" flow back into a payer-pays-gas flow.
+EXISTING_RELAYER=""
+if [ -f apps/web/.env.local ]; then
+  EXISTING_RELAYER=$(grep '^RELAYER_PRIVATE_KEY=0x' apps/web/.env.local | cut -d= -f2 || true)
+fi
+# Anvil account 4's published key, used when nothing is configured. Anvil prints this
+# itself, so it is not a secret; it is here so the local demo works out of the box.
+RELAYER_KEY="${EXISTING_RELAYER:-0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a}"
+
 cat > apps/web/.env.local <<EOF
 NEXT_PUBLIC_CHAIN=local
 NEXT_PUBLIC_STREAM_VAULT=$VAULT
 NEXT_PUBLIC_HANDLE_REGISTRY=$REG
 NEXT_PUBLIC_AUSD_ADDRESS=$AUSD
 MONAD_RPC_URL=$RPC
+# Server-side only: no NEXT_PUBLIC_ prefix, so it cannot be inlined into a client bundle.
+# This key only ever pays gas for other people's permits; it can never move their funds.
+RELAYER_PRIVATE_KEY=$RELAYER_KEY
 EOF
 
 # The relayer pays gas on other people's behalf, so it needs a balance. Fund whatever
 # address the configured key derives to rather than assuming it is one of anvil's
 # pre-funded accounts -- a relay that silently has no MON fails in a confusing way.
-if [ -f apps/web/.env.local ] && grep -q '^RELAYER_PRIVATE_KEY=0x' apps/web/.env.local; then
-  RKEY=$(grep '^RELAYER_PRIVATE_KEY=' apps/web/.env.local | cut -d= -f2)
-  RADDR=$(cast wallet address --private-key "$RKEY")
-  echo "==> funding relayer $RADDR"
-  cast send "$RADDR" --value 5ether --rpc-url "$RPC" --private-key "$PK" >/dev/null
-  printf '    balance    '; cast balance "$RADDR" --rpc-url "$RPC" --ether; echo " MON"
-fi
+RADDR=$(cast wallet address --private-key "$RELAYER_KEY")
+echo "==> funding relayer $RADDR"
+cast send "$RADDR" --value 5ether --rpc-url "$RPC" --private-key "$PK" >/dev/null
+printf '    balance    '; cast balance "$RADDR" --rpc-url "$RPC" --ether; echo " MON"
 
 if [ "$SEED" = "1" ]; then
   echo "==> seeding demo data"

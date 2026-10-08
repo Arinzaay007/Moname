@@ -94,6 +94,27 @@ historic state and cap `eth_getLogs` at a 100-block range — about **30 seconds
 recent `SCAN_WINDOW` (64) streams, and older ones need a per-recipient on-chain index or an
 Envio HyperSync indexer. Both are in `ROADMAP.md`. Disclosing the limit beats letting a judge
 discover it.
+### 2.7 Paying with no Moname account at all
+
+`/pay/@arinza` is the mirror of the recipient page, and it removes the other half of the
+onboarding friction.
+
+Before this existed, paying someone required creating a passkey and unlocking the owner key —
+which meant a payer had to onboard to Moname just to send money once. That is backwards. The
+only thing a payer actually needs is a browser wallet holding AUSD, which they already have if
+they have money to send.
+
+So the flow is: connect wallet, enter an amount and a duration, sign one EIP-2612 permit. No
+account, no passkey, no Moname identity, no MON, and no transaction sent. The relay broadcasts
+it. The page is explicit that a permit is *a signature and not a transaction*, and shows the
+per-second rate the recipient will see before the payer commits.
+
+The asymmetry is the product: **receiving** needs zero setup because a passkey creates your
+identity; **paying** needs no Moname identity at all.
+
+`tools/test-relay.sh` proves this path against a live deployment using a raw anvil key that has
+never touched Moname — the payer's transaction count is asserted to be zero afterwards.
+
 ---
 
 ## 3. Contracts
@@ -318,6 +339,8 @@ Next.js 15.5.27 App Router · React 19 · TypeScript 5.7.2 · viem 2.37.6 · `@c
 | `app/h/[handle]/page.tsx` | The recipient's public page route — `force-dynamic`, since a handle only exists on-chain |
 | `lib/scan.ts` | Handle resolution, bounded stream enumeration, and stream-phase derivation |
 | `components/RecipientView.tsx` | The public page: live accruing balances with no wallet connected |
+| `app/pay/[handle]/page.tsx` | Pay-a-handle route |
+| `components/PayerView.tsx` | Pay with a browser wallet and no Moname account |
 | `components/Moname.tsx` | The whole flow |
 
 ### 6.1 Passkeys: one passkey, three keys
@@ -447,13 +470,15 @@ corrected several times by *failing tests* rather than accepted as generated.
 | 2 | Deploy to mainnet (143) | Needs ~0.5 MON. Then record addresses **and** tx hashes in the README (§9.2 accepts either; we record both) |
 | 3 | Resolve the Agora bounty's **"mobile app"** wording | The requirement says mobile app; we build responsive web. That wording is worth 40 % of $10k. Message Agora in Discord — their CEO and CTO run the bounty and both mentor |
 | 4 | AUSD-funded flows on testnet | Real test AUSD; Agora's testnet mint is permissioned and sources conflict on whether a public faucet exists |
-| 5 | Relayer service | The permit submitter. Contracts are ready (`creditArrival`, permissionless `createStreamWithPermit`); the service is not written |
-| 6 | Cross-chain inbound | Relay by default; a time-boxed CCTP V2 spike only if streaming is already solid |
-| 7 | Demo video ≤ 3 min (§9.4) | Needs 1–5 above. Test Mera on the exact demo machine first |
-| 8 | Envio HyperSync indexer | Post-hackathon; Monad nodes do not serve historic state |
+| 5 | Cross-chain inbound | Relay by default; a time-boxed CCTP V2 spike only if streaming is already solid |
+| 6 | Demo video ≤ 3 min (§9.4) | Needs 1–5 above. Test Mera on the exact demo machine first |
+| 7 | Envio HyperSync indexer | Post-hackathon; Monad nodes do not serve historic state |
 
-**Shipped since the last revision:** the recipient landing page (§2.6) — `/h/@handle`, read-only,
-no wallet, live `accrued()` polling at 300 ms.
+**Shipped since the last revision:**
+- the recipient landing page (§2.6) — `/h/@handle`, read-only, no wallet, live `accrued()` polling at 300 ms
+- the gasless relay (§6.2) — `app/api/relay`, so a permit signer never sends a transaction
+- the payer page (§2.7) — `/pay/@handle`, pay with a browser wallet and no Moname account
+- `tools/local-dev.sh` and `tools/test-relay.sh`, so the whole local demo and its gasless proof are one command each
 
 **Newly surfaced by building it:** `lib/scan.ts` enumerates streams with a bounded reverse walk
 of the stream counter (`SCAN_WINDOW = 64`), because Monad's `eth_getLogs` cap makes event
@@ -461,4 +486,4 @@ scanning useless. That is O(streams ever created), not O(this recipient's stream
 either an on-chain `mapping(address => uint256[])` index in StreamVault or an Envio indexer.
 We deliberately did **not** add the on-chain index in the final week: StreamVault is fork-tested
 against live mainnet with 58 passing tests, and that verification is worth more than a cheaper
-read. Item 8 above is now load-bearing rather than optional.
+read. Item 7 above is now load-bearing rather than optional.

@@ -171,6 +171,14 @@ cd apps/web && npm install && npm run dev
 
 It reads chain state through `app/api/rpc`, a server-side JSON-RPC proxy, rather than calling a public RPC from the browser: CORS on public RPCs is not something to bet a demo on, and the preview host is not localhost. The proxy allowlists methods, so `eth_getLogs` is refused outright — Monad caps it at a 100-block range anyway and full nodes do not serve arbitrary historic state, so the UI reads live state instead of reconstructing history.
 
+### Paying with no account — `/pay/@handle`
+
+The mirror of the recipient page, and it removes the other half of the onboarding friction. Paying used to require creating a passkey and unlocking the owner key — so a payer had to onboard to Moname just to send money once. That is backwards.
+
+`/pay/@handle` needs a browser wallet holding AUSD and nothing else. Connect, enter an amount and a duration, sign one EIP-2612 permit. No Moname account, no passkey, no MON, no transaction sent — the relay broadcasts it. The page says plainly that a permit is a signature and not a transaction, shows the per-second rate before you commit, and explains what you are agreeing to: the full amount leaves your wallet into the vault immediately, the recipient can cancel nothing but you can, and whatever has accrued is theirs because they earned it.
+
+The asymmetry is the product. **Receiving** needs zero setup because a passkey creates your identity. **Paying** needs no Moname identity at all.
+
 ### The gasless relay — `/api/relay`
 
 `createStreamWithPermit` is permissionless, so anyone can submit a signed permit. The relay exists so the payer does not have to.

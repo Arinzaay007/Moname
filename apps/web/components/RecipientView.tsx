@@ -301,6 +301,27 @@ export default function RecipientView({ rawHandle }: { rawHandle: string }) {
         <div className="mono muted small">
           {address ? `receives at ${address}` : resolveError ?? "resolving…"}
         </div>
+        {handle && address && (
+          <div className="row" style={{ marginTop: 12, gap: 8 }}>
+            {/* Closes the loop: a recipient shares this page, a sender clicks through
+                and pays without ever creating a Moname account. */}
+            <Link href={`/pay/@${handle}`} className="pill" style={{ textDecoration: "none" }}>
+              pay @{handle} ↗
+            </Link>
+            <button
+              className="pill"
+              style={{ cursor: "pointer" }}
+              onClick={() => {
+                const url = `${window.location.origin}/pay/@${handle}`;
+                void navigator.clipboard?.writeText(url);
+                setNotice(`Copied payment link ${url}`);
+              }}
+            >
+              copy payment link
+            </button>
+            <span className="small muted">share this and anyone can pay you — no account needed</span>
+          </div>
+        )}
       </div>
 
       {!isDeployed && (
