@@ -238,6 +238,31 @@ Mera's two ceremonies take different argument shapes: creation wants `rp: { id, 
 
 **Unverified: whether PRF survives passkey sync to a new device.** Passkeys sync via iCloud Keychain and Google Password Manager, so in principle a Mera vault follows a user to a new phone. But Mera needs the WebAuthn PRF extension, and PRF is already known to be fragile on desktop Chrome. Cross-device recovery is therefore *plausible but untested*, and should be tested on two real devices before being promised to anyone. This is the one place where an email-based custodial wallet has a genuine advantage over a passkey.
 
+### Hosting the web app
+
+The production build passes clean (`npm run build` — six routes, 222 kB worst-case First Load JS). On Vercel:
+
+1. Import the repository and set **Root Directory** to `apps/web`. There is no workspace config at the repo root, so `apps/web` is standalone and needs nothing else.
+2. Framework preset **Next.js**; build command `npm run build` (the default).
+3. Set three environment variables — **never commit them**:
+
+| Variable | Value | Scope |
+|---|---|---|
+| `NEXT_PUBLIC_CHAIN` | `mainnet` | public, inlined into the client bundle |
+| `MONAD_RPC_URL` | `https://rpc.monad.xyz` | server only |
+| `RELAYER_PRIVATE_KEY` | a funded key | **server only** — no `NEXT_PUBLIC_` prefix, so it cannot reach the client bundle |
+
+Contract addresses are **not** environment variables: `lib/config.ts` carries the mainnet ones as defaults, so the deployed app points at the live deployment with nothing further. Setting `NEXT_PUBLIC_CHAIN` to `local` or `testnet` disables those defaults deliberately, so the app refuses to pretend it is connected when addresses are unset.
+
+**Passkeys bind to the hostname.** WebAuthn's relying-party id comes from `window.location.hostname`, so a passkey created on one domain will not unlock on another. Pick the production domain before anyone creates a passkey you intend to keep — a preview deployment URL and a custom domain are different relying parties.
+
+**Two relay limits that serverless makes real rather than theoretical**, both documented at their definitions in `app/api/relay/route.ts`:
+
+- Sends are serialised through a module-level promise chain, which holds within one instance but **not across Vercel's concurrent instances**. Two simultaneous relays can collide on a nonce and one fails. The failure is safe — a dropped transaction, never a lost or doubled payment, since the permit nonce is consumed on chain exactly once — but a production relayer needs shared-state nonce management or a single long-lived process.
+- The per-IP throttle is in-memory, so the effective limit is per instance, not per service.
+
+Neither is abuse protection, and neither is presented as such. The real protection is that a permit can only ever move the signer's own funds by the signer's own chosen amount.
+
 ### Running it without a mainnet deployment
 
 §9.1 wants a functioning prototype, and one that cannot start until someone funds a key is not one. So `NEXT_PUBLIC_CHAIN=local` runs against a Monad-mode anvil:

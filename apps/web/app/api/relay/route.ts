@@ -65,8 +65,16 @@ const GAS_CEILING = 400_000n; // and never above the observed max plus margin
 /**
  * Sends are serialised. viem derives the nonce from `pending`, so two concurrent
  * relays would compute the same nonce and one would be dropped or replaced. A
- * promise chain is enough for a single-process demo; a real deployment needs a
- * nonce manager backed by shared state.
+ * promise chain is enough for a single process.
+ *
+ * ⚠️ THAT DOES NOT HOLD ON SERVERLESS. Vercel runs each concurrent invocation in
+ * its own instance, so this module-level queue serialises within one instance and
+ * not across them: two simultaneous relays can still collide on a nonce and one
+ * will fail. The failure is safe -- a dropped transaction, never a lost or doubled
+ * payment, because the permit's nonce is consumed on chain exactly once -- but it
+ * is a real limit at concurrent load. A production relayer needs a nonce manager
+ * backed by shared state (Upstash Redis or a database row lock), or a single
+ * long-lived process instead of serverless.
  */
 let sendQueue: Promise<unknown> = Promise.resolve();
 function serialised<T>(fn: () => Promise<T>): Promise<T> {
@@ -76,8 +84,9 @@ function serialised<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Best-effort per-IP throttle. In-memory, so it does not survive a restart and does
- * not coordinate across instances — fine for a demo, and stated as such rather than
+ * Best-effort per-IP throttle. In-memory, so it does not survive a restart and, on
+ * serverless, does not coordinate across instances — the effective limit is
+ * RATE_MAX per instance rather than per service. Stated as such rather than
  * dressed up as abuse protection. The real protection is that a permit can only ever
  * move the signer's own funds by the signer's own chosen amount.
  */
