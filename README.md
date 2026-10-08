@@ -1,5 +1,7 @@
 # Moname
 
+**Repository:** <https://github.com/Arinzaay007/Moname> · MIT · Monad Metropolis, Track 2 — Consumer Products & Payments
+
 **Money that arrives from anywhere and streams in by the second, in Agora's AUSD, on Monad mainnet.**
 
 Built for [Monad Metropolis](https://monad.xyz/developers/hackathons/metropolis) — Track 2, Consumer Products & Payments.
